@@ -60,3 +60,11 @@ class ProductRepository:
     async def count(self) -> int:
         row = await self.db.fetchone("SELECT COUNT(*) AS count FROM products")
         return int(row["count"])
+
+    async def distinct_values(self, column: str):
+        allowed = {"category", "subcategory", "optimization_type", "game", "badge"}
+        if column not in allowed:
+            raise ValueError(f"Unsupported column: {column}")
+        return await self.db.fetchall(
+            f"SELECT DISTINCT {column} AS value FROM products WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"
+        )

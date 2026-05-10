@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from aiogram import Bot, Router
-from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery
 
 from bot.keyboards.user import crypto_invoice
 from bot.repositories.orders import OrderRepository
 from bot.repositories.products import ProductRepository
+from bot.repositories.promos import PromoRepository, apply_discount
 from bot.services.delivery import send_file_or_notice
 from bot.services.payments import CryptoBotService
 
@@ -13,21 +15,43 @@ router = Router()
 
 
 @router.callback_query(lambda c: c.data.startswith("buy_stars:"))
-async def buy_stars(callback: CallbackQuery, bot: Bot, products: ProductRepository) -> None:
-    product_id = int(callback.data.split(":")[1])
+async def buy_stars(callback: CallbackQuery, bot: Bot, products: ProductRepository, promos: PromoRepository, state: FSMContext) -> None:
+    await state.clear()
+    _, product_id_raw, promo_code = callback.data.split(":")
+    product_id = int(product_id_raw)
     product = await products.get(product_id)
     if not product:
         await callback.answer("Товар не найден", show_alert=True)
         return
 
+    final_price = product["price"]
+    payload_promo = "none"
+    if promo_code != "none":
+        promo, error = await promos.validate(promo_code)
+        if error:
+            await callback.answer(error, show_alert=True)
+            return
+        final_price = apply_discount(product["price"], promo["discount_percent"])
+        payload_promo = promo["code"]
+
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=product["title"],
         description=product["description"][:255],
-        payload=f"product:{product_id}",
+        payload=f"product:{product_id}:{payload_promo}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label=product["title"], amount=product["price"])],
+        prices=[LabeledPrice(label=product["title"], amount=final_price)],
+    )
+    await bot.send_message(
+        callback.from_user.id,
+        "Если сейчас не получается оплатить, можно вернуться к товару или отменить действие.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад к товару", callback_data=f"product:{product_id}")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="main")],
+            ]
+        ),
     )
     await callback.answer("Счёт отправлен в личные сообщения.")
 
@@ -38,28 +62,53 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
 
 
 @router.message(lambda m: m.successful_payment is not None)
-async def successful_payment(message: Message, bot: Bot, products: ProductRepository, orders: OrderRepository) -> None:
+async def successful_payment(
+    message: Message,
+    bot: Bot,
+    products: ProductRepository,
+    orders: OrderRepository,
+    promos: PromoRepository,
+) -> None:
     payload = message.successful_payment.invoice_payload
     if not payload.startswith("product:"):
         await message.answer("Оплата получена, но товар не распознан. Напишите в поддержку.")
         return
 
-    product_id = int(payload.split(":")[1])
+    parts = payload.split(":")
+    product_id = int(parts[1])
+    promo_code = parts[2] if len(parts) > 2 and parts[2] != "none" else None
     product = await products.get(product_id)
     if not product:
         await message.answer("Оплата получена, но товар уже недоступен. Напишите в поддержку.")
         return
 
-    await orders.add_purchase(
+    discount_percent = 0
+    if promo_code:
+        promo, error = await promos.validate(promo_code)
+        if not error:
+            discount_percent = promo["discount_percent"]
+
+    purchase_id = await orders.add_purchase(
         user_id=message.from_user.id,
         product_id=product_id,
-        amount=product["price"],
+        amount=message.successful_payment.total_amount,
         provider="telegram_stars",
         payload=message.successful_payment.telegram_payment_charge_id,
+        original_amount=product["price"],
+        discount_percent=discount_percent,
+        promo_code=promo_code,
     )
+    if purchase_id and promo_code:
+        await promos.redeem(promo_code, message.from_user.id, product_id, purchase_id)
     await send_file_or_notice(bot, message.from_user.id, product["full_file_path"], f"✅ Полная версия: {product['title']}")
     if product["is_extra"] and product["restore_file_path"]:
         await send_file_or_notice(bot, message.from_user.id, product["restore_file_path"], "♻️ Файл/инструкция для отката настроек")
+    await message.answer(
+        "Если хотите оставить отзыв о товаре, зайдите в раздел «Мои покупки», выберите купленный товар и нажмите «Оставить отзыв».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🧾 Мои покупки", callback_data="purchase_history")]]
+        ),
+    )
 
 
 @router.callback_query(lambda c: c.data.startswith("buy_crypto:"))
@@ -68,23 +117,37 @@ async def buy_crypto(
     products: ProductRepository,
     orders: OrderRepository,
     cryptobot: CryptoBotService,
+    promos: PromoRepository,
+    state: FSMContext,
 ) -> None:
+    await state.clear()
     if not cryptobot.enabled:
         await callback.answer("CryptoBot не настроен.", show_alert=True)
         return
 
-    product_id = int(callback.data.split(":")[1])
+    _, product_id_raw, promo_code = callback.data.split(":")
+    product_id = int(product_id_raw)
     product = await products.get(product_id)
     if not product:
         await callback.answer("Товар не найден", show_alert=True)
         return
 
+    final_price = product["price"]
+    payload_promo = None
+    if promo_code != "none":
+        promo, error = await promos.validate(promo_code)
+        if error:
+            await callback.answer(error, show_alert=True)
+            return
+        final_price = apply_discount(product["price"], promo["discount_percent"])
+        payload_promo = promo["code"]
+
     invoice = await cryptobot.create_invoice(
-        amount=product["price"],
+        amount=final_price,
         description=f"Покупка {product['title']}",
         payload=f"{callback.from_user.id}:{product_id}",
     )
-    await orders.create_crypto_invoice(invoice.invoice_id, callback.from_user.id, product_id, product["price"])
+    await orders.create_crypto_invoice(invoice.invoice_id, callback.from_user.id, product_id, final_price, payload_promo)
     await callback.message.edit_text(
         "💎 Счёт CryptoBot создан.\n\nПосле оплаты нажмите «Проверить оплату».",
         reply_markup=crypto_invoice(invoice.pay_url, invoice.invoice_id),
@@ -99,6 +162,7 @@ async def check_crypto(
     products: ProductRepository,
     orders: OrderRepository,
     cryptobot: CryptoBotService,
+    promos: PromoRepository,
 ) -> None:
     invoice_id = callback.data.split(":")[1]
     invoice = await orders.get_crypto_invoice(invoice_id)
@@ -116,9 +180,34 @@ async def check_crypto(
         await callback.answer("Товар не найден.", show_alert=True)
         return
 
+    discount_percent = 0
+    promo_code = invoice["promo_code"]
+    if promo_code:
+        promo, error = await promos.validate(promo_code)
+        if not error:
+            discount_percent = promo["discount_percent"]
+
     await orders.mark_crypto_paid(invoice_id)
-    await orders.add_purchase(callback.from_user.id, product["id"], product["price"], "cryptobot", invoice_id)
+    purchase_id = await orders.add_purchase(
+        callback.from_user.id,
+        product["id"],
+        invoice["amount"],
+        "cryptobot",
+        invoice_id,
+        original_amount=product["price"],
+        discount_percent=discount_percent,
+        promo_code=promo_code,
+    )
+    if purchase_id and promo_code:
+        await promos.redeem(promo_code, callback.from_user.id, product["id"], purchase_id)
     await send_file_or_notice(bot, callback.from_user.id, product["full_file_path"], f"✅ Полная версия: {product['title']}")
     if product["is_extra"] and product["restore_file_path"]:
         await send_file_or_notice(bot, callback.from_user.id, product["restore_file_path"], "♻️ Файл/инструкция для отката настроек")
+    await bot.send_message(
+        callback.from_user.id,
+        "Если хотите оставить отзыв о товаре, зайдите в раздел «Мои покупки», выберите купленный товар и нажмите «Оставить отзыв».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🧾 Мои покупки", callback_data="purchase_history")]]
+        ),
+    )
     await callback.answer("Оплата подтверждена, файл отправлен.")

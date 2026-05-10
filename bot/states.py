@@ -12,9 +12,29 @@ class AddProduct(StatesGroup):
     badge = State()
     before_fps = State()
     after_fps = State()
-    photo_path = State()
-    screenshot_path = State()
-    full_file_path = State()
-    demo_file_path = State()
+    photo = State()
+    screenshot = State()
+    full_link = State()
+    demo_link = State()
     is_extra = State()
-    restore_file_path = State()
+    restore_link = State()
+
+
+class PromoCreate(StatesGroup):
+    code = State()
+    discount_percent = State()
+    expires_at = State()
+    usage_limit = State()
+
+
+class PromoApply(StatesGroup):
+    code = State()
+
+
+class ReviewCreate(StatesGroup):
+    rating = State()
+    comment = State()
+
+
+class SectionPhotoEdit(StatesGroup):
+    photo = State()

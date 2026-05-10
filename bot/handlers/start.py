@@ -6,24 +6,32 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.config import Settings
 from bot.keyboards.user import back_to_main, main_menu
+from bot.repositories.section_photos import SectionPhotoRepository
 from bot.repositories.users import UserRepository
+from bot.services.section_display import answer_section, edit_section
 
 router = Router()
 
 
 @router.message(CommandStart())
-async def start(message: Message, users: UserRepository, settings: Settings) -> None:
+async def start(message: Message, users: UserRepository, settings: Settings, section_photos: SectionPhotoRepository) -> None:
     await users.get_or_create(message.from_user.id)
-    await message.answer(
+    await answer_section(
+        message,
+        section_photos,
+        "main",
         "Привет! Здесь можно купить файлы оптимизации ПК для игр, получить демо и выбрать подписку под свои задачи.",
         reply_markup=main_menu(message.from_user.id in settings.admin_ids),
     )
 
 
 @router.callback_query(lambda c: c.data == "main")
-async def main(callback: CallbackQuery, users: UserRepository, settings: Settings) -> None:
+async def main(callback: CallbackQuery, users: UserRepository, settings: Settings, section_photos: SectionPhotoRepository) -> None:
     await users.get_or_create(callback.from_user.id)
-    await callback.message.edit_text(
+    await edit_section(
+        callback,
+        section_photos,
+        "main",
         "Главное меню:",
         reply_markup=main_menu(callback.from_user.id in settings.admin_ids),
     )
@@ -48,8 +56,11 @@ async def faq(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(lambda c: c.data == "support")
-async def support(callback: CallbackQuery, settings: Settings) -> None:
-    await callback.message.edit_text(
+async def support(callback: CallbackQuery, settings: Settings, section_photos: SectionPhotoRepository) -> None:
+    await edit_section(
+        callback,
+        section_photos,
+        "support",
         "💬 Поддержка / Помощь с выбором\n\n"
         f"Напишите администратору: {settings.support_username}\n"
         "Опишите процессор, видеокарту, ОЗУ, Windows и игру, для которой нужна оптимизация.",
@@ -59,8 +70,11 @@ async def support(callback: CallbackQuery, settings: Settings) -> None:
 
 
 @router.callback_query(lambda c: c.data == "reviews")
-async def reviews(callback: CallbackQuery, settings: Settings) -> None:
-    await callback.message.edit_text(
+async def reviews(callback: CallbackQuery, settings: Settings, section_photos: SectionPhotoRepository) -> None:
+    await edit_section(
+        callback,
+        section_photos,
+        "reviews",
         "⭐ Отзывы\n\n"
         f"Канал с отзывами, скриншотами результатов и примерами до/после:\n{settings.reviews_channel_url}",
         reply_markup=back_to_main(),

@@ -23,7 +23,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
 def profile_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="💳 Пополнить баланс", callback_data="topup")
-    builder.button(text="🧾 История покупок", callback_data="purchase_history")
+    builder.button(text="🧾 Мои покупки", callback_data="purchase_history")
     builder.button(text="🔔 Подписки", callback_data="my_subscriptions")
     builder.button(text="⬅️ Главное меню", callback_data="main")
     builder.adjust(1)
@@ -79,27 +79,36 @@ def products(rows, category: str, subcategory: str, optimization_type: str, demo
     return builder.as_markup()
 
 
-def product_actions(product_id: int, is_extra: bool, crypto_enabled: bool) -> InlineKeyboardMarkup:
+def product_actions(product_id: int, is_extra: bool, crypto_enabled: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🎁 Получить демо", callback_data=f"demo_product:{product_id}")
     if is_extra:
         builder.button(text="⚠️ Я понимаю риски", callback_data=f"risk_ok:{product_id}")
     else:
-        builder.button(text="⭐ Купить за Telegram Stars", callback_data=f"buy_stars:{product_id}")
-        if crypto_enabled:
-            builder.button(text="💎 Купить через CryptoBot", callback_data=f"buy_crypto:{product_id}")
+        builder.button(text="🛒 Купить", callback_data=f"pay_options:{product_id}:none")
+        builder.button(text="🎟 Ввести промокод", callback_data=f"promo_apply:{product_id}")
     builder.button(text="🔔 Оформить подписку", callback_data=f"subscribe_product:{product_id}")
     builder.button(text="⬅️ Каталог", callback_data="catalog")
     builder.adjust(1)
     return builder.as_markup()
 
 
-def extra_confirmed_actions(product_id: int, crypto_enabled: bool) -> InlineKeyboardMarkup:
+def extra_confirmed_actions(product_id: int, crypto_enabled: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="⭐ Купить за Telegram Stars", callback_data=f"buy_stars:{product_id}")
-    if crypto_enabled:
-        builder.button(text="💎 Купить через CryptoBot", callback_data=f"buy_crypto:{product_id}")
+    builder.button(text="🛒 Купить", callback_data=f"pay_options:{product_id}:none")
+    builder.button(text="🎟 Ввести промокод", callback_data=f"promo_apply:{product_id}")
     builder.button(text="⬅️ К товару", callback_data=f"product:{product_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def payment_options(product_id: int, promo_code: str | None = None) -> InlineKeyboardMarkup:
+    promo = promo_code or "none"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ Оплатить Telegram Stars", callback_data=f"buy_stars:{product_id}:{promo}")
+    builder.button(text="💎 Оплатить CryptoBot", callback_data=f"buy_crypto:{product_id}:{promo}")
+    builder.button(text="🎟 Изменить промокод", callback_data=f"promo_apply:{product_id}")
+    builder.button(text="❌ Отмена", callback_data=f"product:{product_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -119,5 +128,24 @@ def crypto_invoice(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="💎 Оплатить CryptoBot", url=pay_url)
     builder.button(text="✅ Проверить оплату", callback_data=f"check_crypto:{invoice_id}")
+    builder.button(text="❌ Отмена", callback_data="main")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def purchases_for_review(rows) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for row in rows:
+        builder.button(text=f"⭐ Оставить отзыв: {row['title']}", callback_data=f"review_start:{row['product_id']}")
+    builder.button(text="⬅️ Личный кабинет", callback_data="profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def rating_keyboard(product_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for rating in range(1, 6):
+        builder.button(text=f"{rating} ⭐", callback_data=f"review_rating:{product_id}:{rating}")
+    builder.button(text="❌ Отмена", callback_data="purchase_history")
+    builder.adjust(5, 1)
     return builder.as_markup()

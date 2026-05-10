@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from aiogram import Bot, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
+from aiogram.types import Message
 
 from bot.config import Settings
 from bot.keyboards.user import (
@@ -12,15 +14,20 @@ from bot.keyboards.user import (
     demo_requirements,
     extra_confirmed_actions,
     optimization_types,
+    payment_options,
     product_actions,
     products as products_keyboard,
     subcategories,
 )
 from bot.repositories.orders import OrderRepository
 from bot.repositories.products import ProductRepository
+from bot.repositories.promos import PromoRepository, apply_discount
+from bot.repositories.section_photos import SectionPhotoRepository
 from bot.repositories.subscriptions import SubscriptionRepository
 from bot.services.catalog_seed import DEMO_NOTE
 from bot.services.delivery import send_file_or_notice
+from bot.services.section_display import edit_section
+from bot.states import PromoApply
 from bot.utils.callback_cache import get
 
 router = Router()
@@ -47,7 +54,7 @@ def _product_text(product) -> str:
 
 async def _show_product(callback: CallbackQuery, product, settings: Settings) -> None:
     text = _product_text(product)
-    markup = product_actions(product["id"], bool(product["is_extra"]), bool(settings.cryptobot_token))
+    markup = product_actions(product["id"], bool(product["is_extra"]), True)
     photo_path = product["photo_path"]
     screenshot_path = product["screenshot_path"]
 
@@ -76,7 +83,7 @@ async def catalog(callback: CallbackQuery, products: ProductRepository) -> None:
 
 
 @router.callback_query(lambda c: c.data.startswith("cat:") or c.data.startswith("demo_cat:"))
-async def category(callback: CallbackQuery, products: ProductRepository) -> None:
+async def category(callback: CallbackQuery, products: ProductRepository, section_photos: SectionPhotoRepository) -> None:
     prefix, key = callback.data.split(":", 1)
     category_name = get(key)
     if not category_name:
@@ -84,12 +91,18 @@ async def category(callback: CallbackQuery, products: ProductRepository) -> None
         return
     rows = await products.subcategories(category_name)
     sub_prefix = "demo_sub" if prefix == "demo_cat" else "sub"
-    await callback.message.edit_text(f"{category_name}\n\nВыберите подкатегорию или игру:", reply_markup=subcategories(rows, category_name, sub_prefix))
+    await edit_section(
+        callback,
+        section_photos,
+        f"category:{category_name}",
+        f"{category_name}\n\nВыберите подкатегорию или игру:",
+        reply_markup=subcategories(rows, category_name, sub_prefix),
+    )
     await callback.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("sub:") or c.data.startswith("demo_sub:"))
-async def subcategory(callback: CallbackQuery, products: ProductRepository) -> None:
+async def subcategory(callback: CallbackQuery, products: ProductRepository, section_photos: SectionPhotoRepository) -> None:
     prefix, key = callback.data.split(":", 1)
     value = get(key)
     if not value:
@@ -98,7 +111,10 @@ async def subcategory(callback: CallbackQuery, products: ProductRepository) -> N
     category_name, subcategory_name = value
     rows = await products.optimization_types(category_name, subcategory_name)
     type_prefix = "demo_type" if prefix == "demo_sub" else "type"
-    await callback.message.edit_text(
+    await edit_section(
+        callback,
+        section_photos,
+        f"subcategory:{subcategory_name}",
         f"{category_name} → {subcategory_name}\n\nВыберите тип оптимизации:",
         reply_markup=optimization_types(rows, category_name, subcategory_name, type_prefix),
     )
@@ -122,7 +138,8 @@ async def optimization_type(callback: CallbackQuery, products: ProductRepository
 
 
 @router.callback_query(lambda c: c.data.startswith("product:"))
-async def product(callback: CallbackQuery, products: ProductRepository, settings: Settings) -> None:
+async def product(callback: CallbackQuery, products: ProductRepository, settings: Settings, state: FSMContext) -> None:
+    await state.clear()
     product_id = int(callback.data.split(":")[1])
     item = await products.get(product_id)
     if not item:
@@ -143,9 +160,87 @@ async def risk_ok(callback: CallbackQuery, products: ProductRepository, settings
         "⚠️ Вы подтвердили, что понимаете риски.\n\n"
         "Данный файл может изменить системные настройки и повлиять на работу Windows. "
         "Используйте на свой страх и риск. После покупки будет выдан основной файл и restore-инструкция/файл.",
-        reply_markup=extra_confirmed_actions(product_id, bool(settings.cryptobot_token)),
+        reply_markup=extra_confirmed_actions(product_id, True),
     )
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("pay_options:"))
+async def pay_options(callback: CallbackQuery, products: ProductRepository, promos: PromoRepository) -> None:
+    _, product_id_raw, promo_code = callback.data.split(":")
+    product_id = int(product_id_raw)
+    item = await products.get(product_id)
+    if not item:
+        await callback.answer("Товар не найден", show_alert=True)
+        return
+
+    final_price = item["price"]
+    discount_percent = 0
+    code_for_buttons = None
+    promo_line = "Промокод не применён."
+    if promo_code != "none":
+        promo, error = await promos.validate(promo_code)
+        if error:
+            await callback.answer(error, show_alert=True)
+            return
+        discount_percent = promo["discount_percent"]
+        final_price = apply_discount(item["price"], discount_percent)
+        code_for_buttons = promo["code"]
+        promo_line = f"Промокод {promo['code']} применён: скидка {discount_percent}%."
+
+    await callback.message.edit_text(
+        f"🛒 Оплата товара\n\n"
+        f"Товар: {item['title']}\n"
+        f"Цена: {item['price']} ⭐\n"
+        f"{promo_line}\n"
+        f"Итого к оплате: {final_price} ⭐\n\n"
+        "Выберите способ оплаты или нажмите «Отмена», чтобы вернуться к товару.",
+        reply_markup=payment_options(product_id, code_for_buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("promo_apply:"))
+async def promo_apply(callback: CallbackQuery, state: FSMContext, products: ProductRepository) -> None:
+    product_id = int(callback.data.split(":")[1])
+    item = await products.get(product_id)
+    if not item:
+        await callback.answer("Товар не найден", show_alert=True)
+        return
+    await state.set_state(PromoApply.code)
+    await state.update_data(product_id=product_id)
+    await callback.message.edit_text(
+        f"🎟 Промокод для товара «{item['title']}»\n\n"
+        "Отправьте промокод одним сообщением или нажмите «Отмена».",
+        reply_markup=payment_options(product_id, None),
+    )
+    await callback.answer()
+
+
+@router.message(PromoApply.code)
+async def promo_apply_code(message: Message, state: FSMContext, products: ProductRepository, promos: PromoRepository) -> None:
+    data = await state.get_data()
+    product_id = data["product_id"]
+    item = await products.get(product_id)
+    if not item:
+        await state.clear()
+        await message.answer("Товар не найден.", reply_markup=back_to_main())
+        return
+
+    code = (message.text or "").strip().upper()
+    promo, error = await promos.validate(code)
+    if error:
+        await message.answer(f"{error}\n\nОтправьте другой промокод или вернитесь к товару.", reply_markup=payment_options(product_id, None))
+        return
+
+    final_price = apply_discount(item["price"], promo["discount_percent"])
+    await state.clear()
+    await message.answer(
+        f"🎟 Промокод {promo['code']} применён.\n\n"
+        f"Скидка: {promo['discount_percent']}%\n"
+        f"Цена: {item['price']} ⭐ → {final_price} ⭐",
+        reply_markup=payment_options(product_id, promo["code"]),
+    )
 
 
 @router.callback_query(lambda c: c.data.startswith("demo_product:"))

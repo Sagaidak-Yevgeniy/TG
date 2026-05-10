@@ -68,6 +68,9 @@ async def init_db(db: Database) -> None:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
+        original_amount INTEGER,
+        discount_percent INTEGER NOT NULL DEFAULT 0,
+        promo_code TEXT,
         amount INTEGER NOT NULL,
         provider TEXT NOT NULL,
         payment_payload TEXT,
@@ -101,10 +104,72 @@ async def init_db(db: Database) -> None:
         user_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
         amount INTEGER NOT NULL,
+        promo_code TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS promo_codes (
+        code TEXT PRIMARY KEY,
+        discount_percent INTEGER NOT NULL,
+        expires_at TEXT,
+        usage_limit INTEGER,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS promo_redemptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        purchase_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(code) REFERENCES promo_codes(code)
+    );
+
+    CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        rating INTEGER NOT NULL,
+        comment TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(telegram_id),
+        FOREIGN KEY(product_id) REFERENCES products(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS section_photos (
+        section_key TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_id TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """
     async with await db.connect() as conn:
         await conn.executescript(schema)
+        await _apply_migrations(conn)
         await conn.commit()
+
+
+async def _apply_migrations(conn: aiosqlite.Connection) -> None:
+    """Small SQLite migrations for databases created by earlier project versions."""
+    table_columns = {
+        "purchases": {
+            "original_amount": "INTEGER",
+            "discount_percent": "INTEGER NOT NULL DEFAULT 0",
+            "promo_code": "TEXT",
+        },
+        "crypto_invoices": {
+            "promo_code": "TEXT",
+        },
+    }
+
+    for table, columns in table_columns.items():
+        cursor = await conn.execute(f"PRAGMA table_info({table})")
+        existing = {row["name"] for row in await cursor.fetchall()}
+        for column, definition in columns.items():
+            if column not in existing:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

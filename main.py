@@ -12,6 +12,9 @@ from bot.handlers import admin, catalog, payments, profile, start
 from bot.middleware import DependencyMiddleware
 from bot.repositories.orders import OrderRepository
 from bot.repositories.products import ProductRepository
+from bot.repositories.promos import PromoRepository
+from bot.repositories.reviews import ReviewRepository
+from bot.repositories.section_photos import SectionPhotoRepository
 from bot.repositories.subscriptions import SubscriptionRepository
 from bot.repositories.users import UserRepository
 from bot.services.catalog_seed import seed_catalog
@@ -29,6 +32,9 @@ async def main() -> None:
     products = ProductRepository(database)
     orders = OrderRepository(database)
     subscriptions = SubscriptionRepository(database)
+    promos = PromoRepository(database)
+    reviews = ReviewRepository(database)
+    section_photos = SectionPhotoRepository(database)
     cryptobot = CryptoBotService(settings)
     await seed_catalog(products)
 
@@ -41,6 +47,9 @@ async def main() -> None:
         products=products,
         orders=orders,
         subscriptions_repo=subscriptions,
+        promos=promos,
+        reviews=reviews,
+        section_photos=section_photos,
         cryptobot=cryptobot,
     )
     dispatcher.update.middleware(dependencies)
