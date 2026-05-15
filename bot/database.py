@@ -12,23 +12,25 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     async def connect(self) -> aiosqlite.Connection:
-        db = await aiosqlite.connect(self.path)
+        db = aiosqlite.connect(self.path)
         db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA foreign_keys = ON")
         return db
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         async with await self.connect() as db:
+            await db.execute("PRAGMA foreign_keys = ON")
             await db.execute(query, params)
             await db.commit()
 
     async def fetchone(self, query: str, params: tuple[Any, ...] = ()) -> aiosqlite.Row | None:
         async with await self.connect() as db:
+            await db.execute("PRAGMA foreign_keys = ON")
             cursor = await db.execute(query, params)
             return await cursor.fetchone()
 
     async def fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[aiosqlite.Row]:
         async with await self.connect() as db:
+            await db.execute("PRAGMA foreign_keys = ON")
             cursor = await db.execute(query, params)
             return await cursor.fetchall()
 
@@ -172,6 +174,7 @@ async def init_db(db: Database) -> None:
     );
     """
     async with await db.connect() as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
         await conn.executescript(schema)
         await _apply_migrations(conn)
         await conn.commit()
