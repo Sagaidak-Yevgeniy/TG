@@ -142,9 +142,11 @@ def payment_options(product_id: int, promo_code: str | None = None) -> InlineKey
     return builder.as_markup()
 
 
-def demo_requirements(channel: str, product_id: int) -> InlineKeyboardMarkup:
+def demo_requirements(channel: str, product_id: int, channel_url: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    url = f"https://t.me/{channel.removeprefix('@')}" if channel.startswith("@") else None
+    url = channel_url
+    if not url and channel.startswith("@"):
+        url = f"https://t.me/{channel.removeprefix('@')}"
     if url:
         builder.button(text="📢 Подписаться на канал", url=url)
     builder.button(text="✅ Проверить подписку", callback_data=f"check_demo:{product_id}")

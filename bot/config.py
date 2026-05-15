@@ -13,6 +13,7 @@ class Settings:
     admin_ids: set[int]
     db_path: Path
     required_channel: str
+    required_channel_url: str | None
     reviews_channel_url: str
     support_username: str
     enable_telegram_stars: bool
@@ -37,6 +38,7 @@ def load_settings() -> Settings:
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         db_path=Path(os.getenv("DB_PATH", "data/bot.sqlite3")),
         required_channel=os.getenv("REQUIRED_CHANNEL", "@your_demo_channel").strip(),
+        required_channel_url=(os.getenv("REQUIRED_CHANNEL_URL") or "").strip() or None,
         reviews_channel_url=os.getenv("REVIEWS_CHANNEL_URL", "https://t.me/your_reviews_channel").strip(),
         support_username=os.getenv("SUPPORT_USERNAME", "@your_admin_username").strip(),
         enable_telegram_stars=os.getenv("ENABLE_TELEGRAM_STARS", "true").lower() == "true",

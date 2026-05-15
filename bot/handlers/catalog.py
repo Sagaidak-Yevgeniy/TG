@@ -253,7 +253,7 @@ async def demo_product(callback: CallbackQuery, products: ProductRepository, set
     await callback.message.edit_text(
         f"🎁 Демо для {item['title']}\n\n{DEMO_NOTE}\n\n"
         "Для получения демо нужно подписаться на Telegram-канал бота.",
-        reply_markup=demo_requirements(settings.required_channel, product_id),
+        reply_markup=demo_requirements(settings.required_channel, product_id, settings.required_channel_url),
     )
     await callback.answer()
 
@@ -275,8 +275,14 @@ async def check_demo(
     try:
         member = await bot.get_chat_member(settings.required_channel, callback.from_user.id)
         is_member = member.status in {"member", "administrator", "creator"}
-    except Exception:
-        is_member = False
+    except Exception as error:
+        await callback.answer(
+            "Не удалось проверить подписку. Проверьте, что канал существует, username указан верно, "
+            "а бот добавлен администратором в канал.",
+            show_alert=True,
+        )
+        print(f"Subscription check failed for {settings.required_channel}: {error}")
+        return
 
     if not is_member:
         await callback.answer("Сначала подпишитесь на канал, затем нажмите проверку снова.", show_alert=True)

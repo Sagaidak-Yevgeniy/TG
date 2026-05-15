@@ -14,6 +14,8 @@ services:
         value: data/bot.sqlite3
       - key: REQUIRED_CHANNEL
         value: "@streetschanel"
+      - key: REQUIRED_CHANNEL_URL
+        value: "https://t.me/streetschanel"
       - key: REVIEWS_CHANNEL_URL
         value: "@streetsrepa"
       - key: SUPPORT_USERNAME
