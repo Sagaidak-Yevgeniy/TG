@@ -20,6 +20,8 @@ class Settings:
     cryptobot_token: str | None
     cryptobot_api_url: str
     assets_dir: Path
+    webhook_url: str | None
+    webhook_path: str
 
 
 def _parse_admin_ids(raw: str) -> set[int]:
@@ -45,4 +47,6 @@ def load_settings() -> Settings:
         cryptobot_token=os.getenv("CRYPTOBOT_TOKEN") or None,
         cryptobot_api_url=os.getenv("CRYPTOBOT_API_URL", "https://pay.crypt.bot/api").rstrip("/"),
         assets_dir=Path(os.getenv("ASSETS_DIR", "data/assets")),
+        webhook_url=(os.getenv("WEBHOOK_URL") or "").strip().rstrip("/") or None,
+        webhook_path=os.getenv("WEBHOOK_PATH", "/webhook").strip() or "/webhook",
     )
