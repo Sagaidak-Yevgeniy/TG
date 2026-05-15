@@ -27,7 +27,72 @@ class UserRepository:
         )
 
     async def add_balance(self, telegram_id: int, amount: int) -> None:
+        await self.add_topup(telegram_id, "stars", amount, "manual", None)
+
+    async def add_topup(
+        self,
+        telegram_id: int,
+        balance_type: str,
+        amount: int,
+        provider: str,
+        payload: str | None = None,
+    ) -> None:
+        if balance_type not in {"rub", "stars"}:
+            raise ValueError("balance_type must be rub or stars")
+
+        balance_column = "balance_rub" if balance_type == "rub" else "balance"
+        topup_column = "total_topup_rub" if balance_type == "rub" else "total_topup_stars"
         await self.db.execute(
-            "UPDATE users SET balance = balance + ? WHERE telegram_id = ?",
-            (amount, telegram_id),
+            f"UPDATE users SET {balance_column} = {balance_column} + ?, {topup_column} = {topup_column} + ? WHERE telegram_id = ?",
+            (amount, amount, telegram_id),
         )
+        await self.db.execute(
+            """
+            INSERT INTO topups (user_id, balance_type, amount, provider, payment_payload)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (telegram_id, balance_type, amount, provider, payload),
+        )
+
+    async def purchase_totals(self, telegram_id: int) -> dict[str, int]:
+        rows = await self.db.fetchall(
+            """
+            SELECT provider, SUM(amount) AS total
+            FROM purchases
+            WHERE user_id = ?
+            GROUP BY provider
+            """,
+            (telegram_id,),
+        )
+        totals = {"rub": 0, "stars": 0}
+        for row in rows:
+            if row["provider"] == "cryptobot":
+                totals["rub"] += int(row["total"] or 0)
+            else:
+                totals["stars"] += int(row["total"] or 0)
+        return totals
+
+    async def create_topup_crypto_invoice(self, invoice_id: str, user_id: int, balance_type: str, amount: int) -> None:
+        await self.db.execute(
+            """
+            INSERT OR REPLACE INTO topup_crypto_invoices (invoice_id, user_id, balance_type, amount, status)
+            VALUES (?, ?, ?, ?, 'pending')
+            """,
+            (invoice_id, user_id, balance_type, amount),
+        )
+
+    async def get_topup_crypto_invoice(self, invoice_id: str):
+        return await self.db.fetchone("SELECT * FROM topup_crypto_invoices WHERE invoice_id = ?", (invoice_id,))
+
+    async def mark_topup_crypto_paid(self, invoice_id: str) -> None:
+        await self.db.execute(
+            "UPDATE topup_crypto_invoices SET status = 'paid' WHERE invoice_id = ?",
+            (invoice_id,),
+        )
+
+    async def has_topup_payload(self, payload: str) -> bool:
+        row = await self.db.fetchone(
+            "SELECT 1 FROM topups WHERE payment_payload = ? LIMIT 1",
+            (payload,),
+        )
+        return row is not None

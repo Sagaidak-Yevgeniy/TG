@@ -38,3 +38,7 @@ class ReviewCreate(StatesGroup):
 
 class SectionPhotoEdit(StatesGroup):
     photo = State()
+
+
+class TopUpBalance(StatesGroup):
+    amount = State()

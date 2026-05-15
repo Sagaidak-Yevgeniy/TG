@@ -30,6 +30,35 @@ def profile_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def topup_balance_type() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💵 Баланс в рублях", callback_data="topup_type:rub")
+    builder.button(text="⭐ Баланс в Telegram Stars", callback_data="topup_type:stars")
+    builder.button(text="⬅️ Личный кабинет", callback_data="profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def topup_amounts(balance_type: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for amount in (100, 250, 500, 1000):
+        suffix = "₽" if balance_type == "rub" else "⭐"
+        builder.button(text=f"{amount} {suffix}", callback_data=f"topup_amount:{balance_type}:{amount}")
+    builder.button(text="✍️ Ввести свою сумму", callback_data=f"topup_custom:{balance_type}")
+    builder.button(text="⬅️ Назад", callback_data="topup")
+    builder.adjust(2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def topup_payment_options(balance_type: str, amount: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ Оплатить Telegram Stars", callback_data=f"topup_stars:{balance_type}:{amount}")
+    builder.button(text="💎 Оплатить CryptoBot", callback_data=f"topup_crypto:{balance_type}:{amount}")
+    builder.button(text="❌ Отмена", callback_data="topup")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def back_to_main() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Главное меню", callback_data="main")]]
@@ -129,6 +158,15 @@ def crypto_invoice(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
     builder.button(text="💎 Оплатить CryptoBot", url=pay_url)
     builder.button(text="✅ Проверить оплату", callback_data=f"check_crypto:{invoice_id}")
     builder.button(text="❌ Отмена", callback_data="main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def topup_crypto_invoice(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💎 Оплатить CryptoBot", url=pay_url)
+    builder.button(text="✅ Проверить оплату", callback_data=f"check_topup_crypto:{invoice_id}")
+    builder.button(text="❌ Отмена", callback_data="topup")
     builder.adjust(1)
     return builder.as_markup()
 

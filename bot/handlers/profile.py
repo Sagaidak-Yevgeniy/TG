@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -8,7 +11,15 @@ from aiogram.types import FSInputFile
 from pathlib import Path
 
 from bot.config import Settings
-from bot.keyboards.user import back_to_main, profile_menu, purchases_for_review, rating_keyboard
+from bot.keyboards.user import (
+    back_to_main,
+    profile_menu,
+    purchases_for_review,
+    rating_keyboard,
+    topup_amounts,
+    topup_balance_type,
+    topup_payment_options,
+)
 from bot.repositories.orders import OrderRepository
 from bot.repositories.products import ProductRepository
 from bot.repositories.reviews import ReviewRepository
@@ -16,38 +27,96 @@ from bot.repositories.section_photos import SectionPhotoRepository
 from bot.repositories.subscriptions import SubscriptionRepository
 from bot.repositories.users import UserRepository
 from bot.services.section_display import edit_section
-from bot.states import ReviewCreate
+from bot.states import ReviewCreate, TopUpBalance
 
 router = Router()
+
+
+def _format_registered_at(value: str) -> str:
+    try:
+        dt = datetime.fromisoformat(value).replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    except ValueError:
+        return value
+    return dt.strftime("%H:%M:%S %d-%m-%Y")
 
 
 @router.callback_query(lambda c: c.data == "profile")
 async def profile(callback: CallbackQuery, users: UserRepository, section_photos: SectionPhotoRepository) -> None:
     user = await users.get_or_create(callback.from_user.id)
+    totals = await users.purchase_totals(callback.from_user.id)
     await edit_section(
         callback,
         section_photos,
         "profile",
-        "👤 Личный кабинет\n\n"
-        f"ID пользователя: `{user['telegram_id']}`\n"
-        f"Дата регистрации: {user['registered_at']}\n"
-        f"Количество покупок: {user['purchases_count']}\n"
-        f"Баланс: {user['balance']} ⭐",
-        parse_mode="Markdown",
+        f"👨‍💻 Мой ID: {user['telegram_id']}\n"
+        f"💰 Мой баланс: {user['balance']} ⭐ / {user['balance_rub']} ₽\n"
+        f"🛒 Покупок: {user['purchases_count']}\n"
+        f"👜 Сумма покупок: {totals['rub']} ₽ и {totals['stars']} ⭐\n"
+        f"💸 Сумма пополнений: {user['total_topup_rub']} ₽ и {user['total_topup_stars']} ⭐\n"
+        f"📅 Зарегистрирован: {_format_registered_at(user['registered_at'])}",
         reply_markup=profile_menu(),
     )
     await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "topup")
-async def topup(callback: CallbackQuery) -> None:
+async def topup(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
     await callback.message.edit_text(
         "💳 Пополнение баланса\n\n"
-        "В этой версии покупка товара работает напрямую через Telegram Stars или CryptoBot. "
-        "Баланс оставлен в профиле для будущих промокодов и ручных начислений администратором.",
-        reply_markup=back_to_main(),
+        "Выберите, какой баланс хотите пополнить:",
+        reply_markup=topup_balance_type(),
     )
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("topup_type:"))
+async def topup_type(callback: CallbackQuery) -> None:
+    balance_type = callback.data.split(":")[1]
+    title = "рублях" if balance_type == "rub" else "Telegram Stars"
+    await callback.message.edit_text(
+        f"💳 Пополнение баланса в {title}\n\nВыберите сумму или введите свою:",
+        reply_markup=topup_amounts(balance_type),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("topup_amount:"))
+async def topup_amount(callback: CallbackQuery) -> None:
+    _, balance_type, amount_raw = callback.data.split(":")
+    amount = int(amount_raw)
+    suffix = "₽" if balance_type == "rub" else "⭐"
+    await callback.message.edit_text(
+        f"💳 Пополнение на {amount} {suffix}\n\nВыберите способ оплаты:",
+        reply_markup=topup_payment_options(balance_type, amount),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("topup_custom:"))
+async def topup_custom(callback: CallbackQuery, state: FSMContext) -> None:
+    balance_type = callback.data.split(":")[1]
+    await state.set_state(TopUpBalance.amount)
+    await state.update_data(balance_type=balance_type)
+    suffix = "рублях" if balance_type == "rub" else "Telegram Stars"
+    await callback.message.edit_text(f"Введите сумму пополнения в {suffix} числом:")
+    await callback.answer()
+
+
+@router.message(TopUpBalance.amount)
+async def topup_custom_amount(message: Message, state: FSMContext) -> None:
+    if not message.text or not message.text.isdigit() or int(message.text) <= 0:
+        await message.answer("Сумма должна быть положительным числом.")
+        return
+    data = await state.get_data()
+    await state.clear()
+    balance_type = data["balance_type"]
+    amount = int(message.text)
+    suffix = "₽" if balance_type == "rub" else "⭐"
+    await message.answer(
+        f"💳 Пополнение на {amount} {suffix}\n\nВыберите способ оплаты:",
+        reply_markup=topup_payment_options(balance_type, amount),
+    )
 
 
 @router.callback_query(lambda c: c.data == "purchase_history")

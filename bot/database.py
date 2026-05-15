@@ -39,7 +39,10 @@ async def init_db(db: Database) -> None:
         telegram_id INTEGER PRIMARY KEY,
         registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         purchases_count INTEGER NOT NULL DEFAULT 0,
-        balance INTEGER NOT NULL DEFAULT 0
+        balance INTEGER NOT NULL DEFAULT 0,
+        balance_rub INTEGER NOT NULL DEFAULT 0,
+        total_topup_stars INTEGER NOT NULL DEFAULT 0,
+        total_topup_rub INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS products (
@@ -109,6 +112,26 @@ async def init_db(db: Database) -> None:
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS topups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        balance_type TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        payment_payload TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(telegram_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS topup_crypto_invoices (
+        invoice_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        balance_type TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS promo_codes (
         code TEXT PRIMARY KEY,
         discount_percent INTEGER NOT NULL,
@@ -164,6 +187,11 @@ async def _apply_migrations(conn: aiosqlite.Connection) -> None:
         },
         "crypto_invoices": {
             "promo_code": "TEXT",
+        },
+        "users": {
+            "balance_rub": "INTEGER NOT NULL DEFAULT 0",
+            "total_topup_stars": "INTEGER NOT NULL DEFAULT 0",
+            "total_topup_rub": "INTEGER NOT NULL DEFAULT 0",
         },
     }
 

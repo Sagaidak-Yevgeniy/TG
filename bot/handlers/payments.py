@@ -4,10 +4,11 @@ from aiogram import Bot, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery
 
-from bot.keyboards.user import crypto_invoice
+from bot.keyboards.user import crypto_invoice, topup_crypto_invoice
 from bot.repositories.orders import OrderRepository
 from bot.repositories.products import ProductRepository
 from bot.repositories.promos import PromoRepository, apply_discount
+from bot.repositories.users import UserRepository
 from bot.services.delivery import send_file_or_notice
 from bot.services.payments import CryptoBotService
 
@@ -68,8 +69,24 @@ async def successful_payment(
     products: ProductRepository,
     orders: OrderRepository,
     promos: PromoRepository,
+    users: UserRepository,
 ) -> None:
     payload = message.successful_payment.invoice_payload
+    if payload.startswith("topup:"):
+        _, balance_type, amount_raw = payload.split(":")
+        amount = int(amount_raw)
+        charge_id = message.successful_payment.telegram_payment_charge_id
+        if not await users.has_topup_payload(charge_id):
+            await users.add_topup(message.from_user.id, balance_type, amount, "telegram_stars", charge_id)
+        suffix = "₽" if balance_type == "rub" else "⭐"
+        await message.answer(
+            f"✅ Баланс пополнен на {amount} {suffix}.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")]]
+            ),
+        )
+        return
+
     if not payload.startswith("product:"):
         await message.answer("Оплата получена, но товар не распознан. Напишите в поддержку.")
         return
@@ -211,3 +228,99 @@ async def check_crypto(
         ),
     )
     await callback.answer("Оплата подтверждена, файл отправлен.")
+
+
+@router.callback_query(lambda c: c.data.startswith("topup_stars:"))
+async def topup_stars(callback: CallbackQuery, bot: Bot, users: UserRepository, state: FSMContext) -> None:
+    await state.clear()
+    _, balance_type, amount_raw = callback.data.split(":")
+    amount = int(amount_raw)
+    suffix = "рублей" if balance_type == "rub" else "Stars"
+
+    await users.get_or_create(callback.from_user.id)
+    await bot.send_invoice(
+        chat_id=callback.from_user.id,
+        title=f"Пополнение баланса: {amount} {suffix}",
+        description=f"После оплаты на баланс будет зачислено {amount} {'₽' if balance_type == 'rub' else '⭐'}.",
+        payload=f"topup:{balance_type}:{amount}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=f"{amount} {suffix}", amount=amount)],
+    )
+    await bot.send_message(
+        callback.from_user.id,
+        "Если сейчас не получается оплатить, можно отменить пополнение.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад к пополнению", callback_data="topup")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="profile")],
+            ]
+        ),
+    )
+    await callback.answer("Счёт отправлен в личные сообщения.")
+
+
+@router.callback_query(lambda c: c.data.startswith("topup_crypto:"))
+async def topup_crypto(
+    callback: CallbackQuery,
+    users: UserRepository,
+    cryptobot: CryptoBotService,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+    if not cryptobot.enabled:
+        await callback.answer("CryptoBot не настроен.", show_alert=True)
+        return
+
+    _, balance_type, amount_raw = callback.data.split(":")
+    amount = int(amount_raw)
+    await users.get_or_create(callback.from_user.id)
+    suffix = "₽" if balance_type == "rub" else "⭐"
+    invoice = await cryptobot.create_invoice(
+        amount=amount,
+        description=f"Пополнение баланса на {amount} {suffix}",
+        payload=f"topup:{callback.from_user.id}:{balance_type}:{amount}",
+    )
+    await users.create_topup_crypto_invoice(invoice.invoice_id, callback.from_user.id, balance_type, amount)
+    await callback.message.edit_text(
+        f"💎 Счёт CryptoBot создан.\n\nПосле оплаты будет зачислено {amount} {suffix}.",
+        reply_markup=topup_crypto_invoice(invoice.pay_url, invoice.invoice_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("check_topup_crypto:"))
+async def check_topup_crypto(
+    callback: CallbackQuery,
+    users: UserRepository,
+    cryptobot: CryptoBotService,
+) -> None:
+    invoice_id = callback.data.split(":")[1]
+    invoice = await users.get_topup_crypto_invoice(invoice_id)
+    if not invoice or invoice["user_id"] != callback.from_user.id:
+        await callback.answer("Счёт не найден.", show_alert=True)
+        return
+
+    status = await cryptobot.get_invoice_status(invoice_id)
+    if status != "paid":
+        await callback.answer(f"Оплата пока не найдена. Статус: {status}", show_alert=True)
+        return
+
+    if invoice["status"] != "paid":
+        await users.mark_topup_crypto_paid(invoice_id)
+        await users.add_topup(
+            callback.from_user.id,
+            invoice["balance_type"],
+            invoice["amount"],
+            "cryptobot",
+            invoice_id,
+        )
+
+    suffix = "₽" if invoice["balance_type"] == "rub" else "⭐"
+    await callback.message.edit_text(
+        f"✅ Баланс пополнен на {invoice['amount']} {suffix}.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")]]
+        ),
+    )
+    await callback.answer("Пополнение подтверждено.")
