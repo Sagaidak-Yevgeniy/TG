@@ -12,7 +12,7 @@ class ProductRepository:
     async def create(self, data: dict[str, Any]) -> int:
         fields = ", ".join(data.keys())
         placeholders = ", ".join("?" for _ in data)
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             cursor = await conn.execute(
                 f"INSERT INTO products ({fields}) VALUES ({placeholders})",
                 tuple(data.values()),

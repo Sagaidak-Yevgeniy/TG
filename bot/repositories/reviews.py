@@ -8,7 +8,7 @@ class ReviewRepository:
         self.db = db
 
     async def create(self, user_id: int, product_id: int, rating: int, comment: str) -> int:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             cursor = await conn.execute(
                 """
                 INSERT INTO reviews (user_id, product_id, rating, comment)

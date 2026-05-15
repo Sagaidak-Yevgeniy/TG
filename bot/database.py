@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiosqlite
@@ -11,26 +13,28 @@ class Database:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def connect(self) -> aiosqlite.Connection:
-        db = aiosqlite.connect(self.path)
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        db = await aiosqlite.connect(self.path)
         db.row_factory = aiosqlite.Row
-        return db
+        await db.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield db
+        finally:
+            await db.close()
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
-        async with await self.connect() as db:
-            await db.execute("PRAGMA foreign_keys = ON")
+        async with self.connect() as db:
             await db.execute(query, params)
             await db.commit()
 
     async def fetchone(self, query: str, params: tuple[Any, ...] = ()) -> aiosqlite.Row | None:
-        async with await self.connect() as db:
-            await db.execute("PRAGMA foreign_keys = ON")
+        async with self.connect() as db:
             cursor = await db.execute(query, params)
             return await cursor.fetchone()
 
     async def fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[aiosqlite.Row]:
-        async with await self.connect() as db:
-            await db.execute("PRAGMA foreign_keys = ON")
+        async with self.connect() as db:
             cursor = await db.execute(query, params)
             return await cursor.fetchall()
 
@@ -173,8 +177,7 @@ async def init_db(db: Database) -> None:
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """
-    async with await db.connect() as conn:
-        await conn.execute("PRAGMA foreign_keys = ON")
+    async with db.connect() as conn:
         await conn.executescript(schema)
         await _apply_migrations(conn)
         await conn.commit()

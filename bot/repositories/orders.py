@@ -27,7 +27,7 @@ class OrderRepository:
     ) -> int | None:
         if await self.has_purchase(user_id, product_id):
             return None
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             cursor = await conn.execute(
                 """
                 INSERT INTO purchases
