@@ -6,9 +6,23 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        value: "8445589291"
       - key: DB_PATH
         value: data/bot.sqlite3
+      - key: REQUIRED_CHANNEL
+        value: "@streetschanel"
+      - key: REVIEWS_CHANNEL_URL
+        value: "@streetsrepa"
+      - key: SUPPORT_USERNAME
+        value: "@EndikEZZ"
       - key: ASSETS_DIR
         value: data/assets
       - key: ENABLE_TELEGRAM_STARS
         value: "true"
+      - key: CRYPTOBOT_TOKEN
+        sync: false
+      - key: CRYPTOBOT_API_URL
+        value: https://pay.crypt.bot/api
