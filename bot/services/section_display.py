@@ -17,6 +17,8 @@ async def answer_section(
     photo = await section_photos.get(section_key)
     if photo and Path(photo["file_path"]).exists():
         await message.answer_photo(FSInputFile(photo["file_path"]), caption=text, reply_markup=reply_markup)
+    elif photo and photo["file_id"]:
+        await message.answer_photo(photo["file_id"], caption=text, reply_markup=reply_markup)
     else:
         await message.answer(text, reply_markup=reply_markup)
 
@@ -31,6 +33,9 @@ async def edit_section(
     photo = await section_photos.get(section_key)
     if photo and Path(photo["file_path"]).exists():
         await callback.message.answer_photo(FSInputFile(photo["file_path"]), caption=text, reply_markup=reply_markup)
+        await callback.message.delete()
+    elif photo and photo["file_id"]:
+        await callback.message.answer_photo(photo["file_id"], caption=text, reply_markup=reply_markup)
         await callback.message.delete()
     else:
         await callback.message.edit_text(text, reply_markup=reply_markup)

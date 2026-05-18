@@ -22,13 +22,15 @@ class CryptoBotService:
     def enabled(self) -> bool:
         return bool(self.settings.cryptobot_token)
 
-    async def create_invoice(self, amount: int, description: str, payload: str) -> CryptoInvoice:
+    async def create_invoice(self, amount: int | float, description: str, payload: str, fiat: str = "RUB") -> CryptoInvoice:
         if not self.settings.cryptobot_token:
             raise RuntimeError("CRYPTOBOT_TOKEN is not configured")
 
         headers = {"Crypto-Pay-API-Token": self.settings.cryptobot_token}
         body = {
-            "asset": "USDT",
+            "currency_type": "fiat",
+            "fiat": fiat,
+            "accepted_assets": "USDT,TON,BTC,ETH,LTC,BNB,TRX,USDC",
             "amount": str(amount),
             "description": description[:1024],
             "payload": payload,

@@ -25,6 +25,32 @@ from bot.services.catalog_seed import seed_catalog
 from bot.services.payments import CryptoBotService
 
 
+async def poll_crypto_topups(bot: Bot, users: UserRepository, cryptobot: CryptoBotService) -> None:
+    if not cryptobot.enabled:
+        return
+    while True:
+        try:
+            invoices = await users.pending_topup_crypto_invoices()
+            for invoice in invoices:
+                status = await cryptobot.get_invoice_status(invoice["invoice_id"])
+                if status != "paid":
+                    continue
+                if not await users.has_topup_payload(invoice["invoice_id"]):
+                    await users.add_topup(
+                        invoice["user_id"],
+                        invoice["balance_type"],
+                        invoice["amount"],
+                        "cryptobot",
+                        invoice["invoice_id"],
+                    )
+                await users.mark_topup_crypto_paid(invoice["invoice_id"])
+                suffix = "₽" if invoice["balance_type"] == "rub" else "⭐"
+                await bot.send_message(invoice["user_id"], f"✅ Баланс автоматически пополнен на {invoice['amount']} {suffix}.")
+        except Exception:
+            logging.exception("CryptoBot topup polling failed")
+        await asyncio.sleep(30)
+
+
 def create_health_app() -> web.Application:
     async def health(_: web.Request) -> web.Response:
         return web.Response(text="OK")
@@ -102,6 +128,8 @@ async def main() -> None:
     dispatcher.include_router(catalog.router)
     dispatcher.include_router(payments.router)
     dispatcher.include_router(admin.router)
+
+    asyncio.create_task(poll_crypto_topups(bot, users, cryptobot))
 
     if settings.webhook_url:
         await start_webhook_server(bot, dispatcher, settings)

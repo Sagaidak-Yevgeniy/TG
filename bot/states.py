@@ -8,6 +8,7 @@ class AddProduct(StatesGroup):
     subcategory = State()
     optimization_type = State()
     game = State()
+    price_currency = State()
     price = State()
     badge = State()
     before_fps = State()
@@ -23,7 +24,9 @@ class AddProduct(StatesGroup):
 class PromoCreate(StatesGroup):
     code = State()
     discount_percent = State()
-    expires_at = State()
+    expires_day = State()
+    expires_month = State()
+    expires_year = State()
     usage_limit = State()
 
 
@@ -41,4 +44,10 @@ class SectionPhotoEdit(StatesGroup):
 
 
 class TopUpBalance(StatesGroup):
+    amount = State()
+
+
+class GrantBalance(StatesGroup):
+    user_id = State()
+    balance_type = State()
     amount = State()

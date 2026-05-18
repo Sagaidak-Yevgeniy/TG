@@ -43,6 +43,7 @@ async def init_db(db: Database) -> None:
     schema = """
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
+        username TEXT,
         registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         purchases_count INTEGER NOT NULL DEFAULT 0,
         balance INTEGER NOT NULL DEFAULT 0,
@@ -60,11 +61,14 @@ async def init_db(db: Database) -> None:
         optimization_type TEXT NOT NULL,
         game TEXT,
         price INTEGER NOT NULL,
+        price_currency TEXT NOT NULL DEFAULT 'stars',
         badge TEXT,
         before_fps INTEGER NOT NULL,
         after_fps INTEGER NOT NULL,
         photo_path TEXT,
+        photo_file_id TEXT,
         screenshot_path TEXT,
+        screenshot_file_id TEXT,
         full_file_path TEXT NOT NULL,
         demo_file_path TEXT NOT NULL,
         is_extra INTEGER NOT NULL DEFAULT 0,
@@ -81,6 +85,7 @@ async def init_db(db: Database) -> None:
         discount_percent INTEGER NOT NULL DEFAULT 0,
         promo_code TEXT,
         amount INTEGER NOT NULL,
+        amount_currency TEXT NOT NULL DEFAULT 'stars',
         provider TEXT NOT NULL,
         payment_payload TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,6 +118,7 @@ async def init_db(db: Database) -> None:
         user_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
         amount INTEGER NOT NULL,
+        amount_currency TEXT NOT NULL DEFAULT 'stars',
         promo_code TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -186,18 +192,26 @@ async def init_db(db: Database) -> None:
 async def _apply_migrations(conn: aiosqlite.Connection) -> None:
     """Small SQLite migrations for databases created by earlier project versions."""
     table_columns = {
-        "purchases": {
-            "original_amount": "INTEGER",
-            "discount_percent": "INTEGER NOT NULL DEFAULT 0",
-            "promo_code": "TEXT",
-        },
-        "crypto_invoices": {
-            "promo_code": "TEXT",
-        },
         "users": {
             "balance_rub": "INTEGER NOT NULL DEFAULT 0",
             "total_topup_stars": "INTEGER NOT NULL DEFAULT 0",
             "total_topup_rub": "INTEGER NOT NULL DEFAULT 0",
+            "username": "TEXT",
+        },
+        "products": {
+            "price_currency": "TEXT NOT NULL DEFAULT 'stars'",
+            "photo_file_id": "TEXT",
+            "screenshot_file_id": "TEXT",
+        },
+        "purchases": {
+            "original_amount": "INTEGER",
+            "discount_percent": "INTEGER NOT NULL DEFAULT 0",
+            "promo_code": "TEXT",
+            "amount_currency": "TEXT NOT NULL DEFAULT 'stars'",
+        },
+        "crypto_invoices": {
+            "promo_code": "TEXT",
+            "amount_currency": "TEXT NOT NULL DEFAULT 'stars'",
         },
     }
 

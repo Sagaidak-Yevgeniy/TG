@@ -12,6 +12,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder.button(text="🎁 Демо / Бесплатные файлы", callback_data="demo_catalog")
     builder.button(text="👤 Личный кабинет", callback_data="profile")
     builder.button(text="📘 FAQ", callback_data="faq")
+    builder.button(text="📜 Правила", callback_data="rules")
     builder.button(text="💬 Поддержка / Помощь с выбором", callback_data="support")
     builder.button(text="⭐ Отзывы", callback_data="reviews")
     if is_admin:
@@ -101,7 +102,8 @@ def products(rows, category: str, subcategory: str, optimization_type: str, demo
     action = "demo_product" if demo else "product"
     for row in rows:
         badge = f"{row['badge']} " if row["badge"] else ""
-        builder.button(text=f"{badge}{row['title']} - {row['price']} ⭐", callback_data=f"{action}:{row['id']}")
+        suffix = "₽" if row["price_currency"] == "rub" else "⭐"
+        builder.button(text=f"{badge}{row['title']} - {row['price']} {suffix}", callback_data=f"{action}:{row['id']}")
     back_prefix = "demo_type" if demo else "type"
     builder.button(text="⬅️ Назад", callback_data=f"{back_prefix}:{put((category, subcategory, optimization_type))}")
     builder.adjust(1)

@@ -33,6 +33,10 @@ from bot.utils.callback_cache import get
 router = Router()
 
 
+def price_label(amount: int, currency: str) -> str:
+    return f"{amount} ₽" if currency == "rub" else f"{amount} ⭐"
+
+
 def _product_text(product) -> str:
     badge = f"{product['badge']}\n" if product["badge"] else ""
     extra_warning = (
@@ -48,7 +52,7 @@ def _product_text(product) -> str:
         f"{product['description']}\n\n"
         f"🎮 Игры: {product['game'] or product['subcategory']}\n"
         f"📊 До/после FPS: {product['before_fps']} → {product['after_fps']}\n"
-        f"💰 Цена: {product['price']} ⭐{extra_warning}"
+        f"💰 Цена: {price_label(product['price'], product['price_currency'])}{extra_warning}"
     )
 
 
@@ -63,10 +67,14 @@ async def _show_product(callback: CallbackQuery, product, settings: Settings) ->
         if screenshot_path and Path(screenshot_path).exists():
             await callback.message.answer_photo(FSInputFile(screenshot_path), caption="📊 Реальный скриншот результата")
         await callback.message.delete()
+    elif product["photo_file_id"]:
+        await callback.message.answer_photo(product["photo_file_id"], caption=text, reply_markup=markup)
+        if product["screenshot_file_id"]:
+            await callback.message.answer_photo(product["screenshot_file_id"], caption="📊 Реальный скриншот результата")
+        await callback.message.delete()
     else:
         await callback.message.edit_text(
-            f"{text}\n\n📸 Фото/скриншоты подключаются через поля товара: `{photo_path}`, `{screenshot_path}`",
-            parse_mode="Markdown",
+            text,
             reply_markup=markup,
         )
 
@@ -191,9 +199,9 @@ async def pay_options(callback: CallbackQuery, products: ProductRepository, prom
     await callback.message.edit_text(
         f"🛒 Оплата товара\n\n"
         f"Товар: {item['title']}\n"
-        f"Цена: {item['price']} ⭐\n"
+        f"Цена: {price_label(item['price'], item['price_currency'])}\n"
         f"{promo_line}\n"
-        f"Итого к оплате: {final_price} ⭐\n\n"
+        f"Итого к оплате: {price_label(final_price, item['price_currency'])}\n\n"
         "Выберите способ оплаты или нажмите «Отмена», чтобы вернуться к товару.",
         reply_markup=payment_options(product_id, code_for_buttons),
     )

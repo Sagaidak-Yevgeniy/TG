@@ -11,6 +11,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     builder.button(text="➕ Добавить товар", callback_data="admin_add_product")
     builder.button(text="📦 Список товаров", callback_data="admin_products")
     builder.button(text="👥 Пользователи", callback_data="admin_users")
+    builder.button(text="💸 Выдать баланс", callback_data="admin_grant_balance")
     builder.button(text="💰 Продажи", callback_data="admin_sales")
     builder.button(text="🔔 Подписки", callback_data="admin_subscriptions")
     builder.button(text="🎟 Промокоды", callback_data="admin_promos")
@@ -84,5 +85,14 @@ def section_photo_actions(section_key: str) -> InlineKeyboardMarkup:
     builder.button(text="👁 Посмотреть текущее", callback_data=f"section_photo_view:{put(section_key)}")
     builder.button(text="🗑 Удалить фото", callback_data=f"section_photo_delete:{put(section_key)}")
     builder.button(text="⬅️ Список разделов", callback_data="admin_section_photos")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def grant_balance_type() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ Выдать звёзды", callback_data="grant_type:stars")
+    builder.button(text="₽ Выдать рубли", callback_data="grant_type:rub")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
     builder.adjust(1)
     return builder.as_markup()

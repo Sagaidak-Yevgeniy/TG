@@ -62,7 +62,7 @@ class ProductRepository:
         return int(row["count"])
 
     async def distinct_values(self, column: str):
-        allowed = {"category", "subcategory", "optimization_type", "game", "badge"}
+        allowed = {"category", "subcategory", "optimization_type", "game", "badge", "price_currency"}
         if column not in allowed:
             raise ValueError(f"Unsupported column: {column}")
         return await self.db.fetchall(

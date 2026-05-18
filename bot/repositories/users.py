@@ -7,11 +7,14 @@ class UserRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def get_or_create(self, telegram_id: int):
+    async def get_or_create(self, telegram_id: int, username: str | None = None):
         user = await self.db.fetchone("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
         if user:
+            if username and user["username"] != username:
+                await self.db.execute("UPDATE users SET username = ? WHERE telegram_id = ?", (username, telegram_id))
+                return await self.get(telegram_id)
             return user
-        await self.db.execute("INSERT INTO users (telegram_id) VALUES (?)", (telegram_id,))
+        await self.db.execute("INSERT INTO users (telegram_id, username) VALUES (?, ?)", (telegram_id, username))
         return await self.db.fetchone("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
 
     async def get(self, telegram_id: int):
@@ -46,6 +49,16 @@ class UserRepository:
             f"UPDATE users SET {balance_column} = {balance_column} + ?, {topup_column} = {topup_column} + ? WHERE telegram_id = ?",
             (amount, amount, telegram_id),
         )
+
+    async def grant_balance(
+        self,
+        telegram_id: int,
+        balance_type: str,
+        amount: int,
+        admin_id: int,
+    ) -> None:
+        await self.get_or_create(telegram_id)
+        await self.add_topup(telegram_id, balance_type, amount, "admin_grant", f"admin:{admin_id}")
         await self.db.execute(
             """
             INSERT INTO topups (user_id, balance_type, amount, provider, payment_payload)
@@ -57,16 +70,16 @@ class UserRepository:
     async def purchase_totals(self, telegram_id: int) -> dict[str, int]:
         rows = await self.db.fetchall(
             """
-            SELECT provider, SUM(amount) AS total
+            SELECT amount_currency, SUM(amount) AS total
             FROM purchases
             WHERE user_id = ?
-            GROUP BY provider
+            GROUP BY amount_currency
             """,
             (telegram_id,),
         )
         totals = {"rub": 0, "stars": 0}
         for row in rows:
-            if row["provider"] == "cryptobot":
+            if row["amount_currency"] == "rub":
                 totals["rub"] += int(row["total"] or 0)
             else:
                 totals["stars"] += int(row["total"] or 0)
@@ -88,6 +101,11 @@ class UserRepository:
         await self.db.execute(
             "UPDATE topup_crypto_invoices SET status = 'paid' WHERE invoice_id = ?",
             (invoice_id,),
+        )
+
+    async def pending_topup_crypto_invoices(self):
+        return await self.db.fetchall(
+            "SELECT * FROM topup_crypto_invoices WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100"
         )
 
     async def has_topup_payload(self, payload: str) -> bool:

@@ -15,6 +15,10 @@ from bot.services.payments import CryptoBotService
 router = Router()
 
 
+def _label(amount: int, currency: str) -> str:
+    return f"{amount} ₽" if currency == "rub" else f"{amount} ⭐"
+
+
 @router.callback_query(lambda c: c.data.startswith("buy_stars:"))
 async def buy_stars(callback: CallbackQuery, bot: Bot, products: ProductRepository, promos: PromoRepository, state: FSMContext) -> None:
     await state.clear()
@@ -35,6 +39,7 @@ async def buy_stars(callback: CallbackQuery, bot: Bot, products: ProductReposito
         final_price = apply_discount(product["price"], promo["discount_percent"])
         payload_promo = promo["code"]
 
+    stars_amount = final_price
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=product["title"],
@@ -42,7 +47,7 @@ async def buy_stars(callback: CallbackQuery, bot: Bot, products: ProductReposito
         payload=f"product:{product_id}:{payload_promo}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label=product["title"], amount=final_price)],
+        prices=[LabeledPrice(label=product["title"], amount=stars_amount)],
     )
     await bot.send_message(
         callback.from_user.id,
@@ -109,6 +114,7 @@ async def successful_payment(
         user_id=message.from_user.id,
         product_id=product_id,
         amount=message.successful_payment.total_amount,
+        amount_currency="stars",
         provider="telegram_stars",
         payload=message.successful_payment.telegram_payment_charge_id,
         original_amount=product["price"],
@@ -150,6 +156,7 @@ async def buy_crypto(
         return
 
     final_price = product["price"]
+    price_currency = product["price_currency"]
     payload_promo = None
     if promo_code != "none":
         promo, error = await promos.validate(promo_code)
@@ -161,10 +168,11 @@ async def buy_crypto(
 
     invoice = await cryptobot.create_invoice(
         amount=final_price,
-        description=f"Покупка {product['title']}",
+        description=f"Покупка {product['title']} на {_label(final_price, price_currency)}",
         payload=f"{callback.from_user.id}:{product_id}",
+        fiat="RUB",
     )
-    await orders.create_crypto_invoice(invoice.invoice_id, callback.from_user.id, product_id, final_price, payload_promo)
+    await orders.create_crypto_invoice(invoice.invoice_id, callback.from_user.id, product_id, final_price, price_currency, payload_promo)
     await callback.message.edit_text(
         "💎 Счёт CryptoBot создан.\n\nПосле оплаты нажмите «Проверить оплату».",
         reply_markup=crypto_invoice(invoice.pay_url, invoice.invoice_id),
@@ -209,6 +217,7 @@ async def check_crypto(
         callback.from_user.id,
         product["id"],
         invoice["amount"],
+        invoice["amount_currency"],
         "cryptobot",
         invoice_id,
         original_amount=product["price"],
@@ -280,6 +289,7 @@ async def topup_crypto(
         amount=amount,
         description=f"Пополнение баланса на {amount} {suffix}",
         payload=f"topup:{callback.from_user.id}:{balance_type}:{amount}",
+        fiat="RUB",
     )
     await users.create_topup_crypto_invoice(invoice.invoice_id, callback.from_user.id, balance_type, amount)
     await callback.message.edit_text(
@@ -307,14 +317,15 @@ async def check_topup_crypto(
         return
 
     if invoice["status"] != "paid":
+        if not await users.has_topup_payload(invoice_id):
+            await users.add_topup(
+                callback.from_user.id,
+                invoice["balance_type"],
+                invoice["amount"],
+                "cryptobot",
+                invoice_id,
+            )
         await users.mark_topup_crypto_paid(invoice_id)
-        await users.add_topup(
-            callback.from_user.id,
-            invoice["balance_type"],
-            invoice["amount"],
-            "cryptobot",
-            invoice_id,
-        )
 
     suffix = "₽" if invoice["balance_type"] == "rub" else "⭐"
     await callback.message.edit_text(

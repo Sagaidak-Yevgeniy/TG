@@ -15,7 +15,7 @@ router = Router()
 
 @router.message(CommandStart())
 async def start(message: Message, users: UserRepository, settings: Settings, section_photos: SectionPhotoRepository) -> None:
-    await users.get_or_create(message.from_user.id)
+    await users.get_or_create(message.from_user.id, message.from_user.username)
     await answer_section(
         message,
         section_photos,
@@ -27,7 +27,7 @@ async def start(message: Message, users: UserRepository, settings: Settings, sec
 
 @router.callback_query(lambda c: c.data == "main")
 async def main(callback: CallbackQuery, users: UserRepository, settings: Settings, section_photos: SectionPhotoRepository) -> None:
-    await users.get_or_create(callback.from_user.id)
+    await users.get_or_create(callback.from_user.id, callback.from_user.username)
     await edit_section(
         callback,
         section_photos,
@@ -50,6 +50,31 @@ async def faq(callback: CallbackQuery) -> None:
         "После покупки бот выдаёт файл и инструкцию. Перед применением рекомендуется создать точку восстановления Windows.\n\n"
         "❓ Чем отличается демо-версия от полной?\n"
         "Демо ограничено по функционалу и применяет не все настройки. Полный файл даёт больший прирост FPS и стабильности.",
+        reply_markup=back_to_main(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "rules")
+async def rules(callback: CallbackQuery, section_photos: SectionPhotoRepository) -> None:
+    await edit_section(
+        callback,
+        section_photos,
+        "rules",
+        "📜 ПРАВИЛА STREETS SHOP\n\n"
+        "1. Совершая покупку, пользователь автоматически соглашается с правилами магазина.\n\n"
+        "2. Возврат средств возможен только в случае проблемы со стороны магазина.\n\n"
+        "3. После выдачи товара ответственность за дальнейшее использование товара несёт покупатель.\n\n"
+        "4. Запрещено пытаться обмануть магазин, подделывать доказательства или заниматься мошенничеством.\n\n"
+        "5. Оскорбления, спам и неадекватное поведение в сторону администрации или поддержки запрещены.\n\n"
+        "6. Время ответа поддержки может зависеть от загруженности, но администрация старается отвечать максимально быстро.\n\n"
+        "7. Магазин имеет право отказать в обслуживании пользователю при нарушении правил.\n\n"
+        "8. Все отзывы должны быть настоящими. Фейковые отзывы или попытки накрутки запрещены.\n\n"
+        "9. Покупатель обязан внимательно читать описание товара перед покупкой.\n\n"
+        "10. Перед покупкой рекомендуется проверить отзывы и при необходимости уточнить информацию у поддержки.\n\n"
+        "11. Попытки слива товаров, перепродажи с целью обмана или распространения данных магазина запрещены.\n\n"
+        "12. Правила могут обновляться или изменяться без предварительного уведомления.\n\n"
+        "📞 Поддержка — @EndikEZZ",
         reply_markup=back_to_main(),
     )
     await callback.answer()

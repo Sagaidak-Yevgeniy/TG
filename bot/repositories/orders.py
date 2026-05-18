@@ -19,6 +19,7 @@ class OrderRepository:
         user_id: int,
         product_id: int,
         amount: int,
+        amount_currency: str,
         provider: str,
         payload: str | None = None,
         original_amount: int | None = None,
@@ -31,10 +32,10 @@ class OrderRepository:
             cursor = await conn.execute(
                 """
                 INSERT INTO purchases
-                    (user_id, product_id, original_amount, discount_percent, promo_code, amount, provider, payment_payload)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (user_id, product_id, original_amount, discount_percent, promo_code, amount, amount_currency, provider, payment_payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, product_id, original_amount or amount, discount_percent, promo_code, amount, provider, payload),
+                (user_id, product_id, original_amount or amount, discount_percent, promo_code, amount, amount_currency, provider, payload),
             )
             await conn.commit()
             purchase_id = int(cursor.lastrowid)
@@ -52,8 +53,11 @@ class OrderRepository:
                 purchases.product_id,
                 p.title,
                 p.price,
+                p.price_currency,
                 p.photo_path,
+                p.photo_file_id,
                 purchases.amount,
+                purchases.amount_currency,
                 purchases.discount_percent,
                 purchases.promo_code,
                 purchases.provider,
@@ -69,7 +73,7 @@ class OrderRepository:
     async def list_sales(self):
         return await self.db.fetchall(
             """
-            SELECT purchases.id, purchases.user_id, products.title, purchases.amount, purchases.discount_percent, purchases.promo_code, purchases.provider, purchases.created_at
+            SELECT purchases.id, purchases.user_id, products.title, purchases.amount, purchases.amount_currency, purchases.discount_percent, purchases.promo_code, purchases.provider, purchases.created_at
             FROM purchases
             JOIN products ON products.id = purchases.product_id
             ORDER BY purchases.created_at DESC
@@ -90,13 +94,13 @@ class OrderRepository:
             (user_id, product_id),
         )
 
-    async def create_crypto_invoice(self, invoice_id: str, user_id: int, product_id: int, amount: int, promo_code: str | None = None) -> None:
+    async def create_crypto_invoice(self, invoice_id: str, user_id: int, product_id: int, amount: int, amount_currency: str, promo_code: str | None = None) -> None:
         await self.db.execute(
             """
-            INSERT OR REPLACE INTO crypto_invoices (invoice_id, user_id, product_id, amount, promo_code, status)
-            VALUES (?, ?, ?, ?, ?, 'pending')
+            INSERT OR REPLACE INTO crypto_invoices (invoice_id, user_id, product_id, amount, amount_currency, promo_code, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
             """,
-            (invoice_id, user_id, product_id, amount, promo_code),
+            (invoice_id, user_id, product_id, amount, amount_currency, promo_code),
         )
 
     async def get_crypto_invoice(self, invoice_id: str):

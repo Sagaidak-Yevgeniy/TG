@@ -42,13 +42,14 @@ def _format_registered_at(value: str) -> str:
 
 @router.callback_query(lambda c: c.data == "profile")
 async def profile(callback: CallbackQuery, users: UserRepository, section_photos: SectionPhotoRepository) -> None:
-    user = await users.get_or_create(callback.from_user.id)
+    user = await users.get_or_create(callback.from_user.id, callback.from_user.username)
     totals = await users.purchase_totals(callback.from_user.id)
+    username = f" @{user['username']}" if user["username"] else ""
     await edit_section(
         callback,
         section_photos,
         "profile",
-        f"👨‍💻 Мой ID: {user['telegram_id']}\n"
+        f"👨‍💻 Мой ID: {user['telegram_id']}{username}\n"
         f"💰 Мой баланс: {user['balance']} ⭐ / {user['balance_rub']} ₽\n"
         f"🛒 Покупок: {user['purchases_count']}\n"
         f"👜 Сумма покупок: {totals['rub']} ₽ и {totals['stars']} ⭐\n"
@@ -130,7 +131,8 @@ async def purchase_history(callback: CallbackQuery, orders: OrderRepository) -> 
         for row in rows:
             discount = f", скидка {row['discount_percent']}%" if row["discount_percent"] else ""
             promo = f", промокод {row['promo_code']}" if row["promo_code"] else ""
-            lines.append(f"• {row['title']} — {row['amount']} ⭐{discount}{promo}, {row['provider']}, {row['created_at']}")
+            suffix = "₽" if row["amount_currency"] == "rub" else "⭐"
+            lines.append(f"• {row['title']} — {row['amount']} {suffix}{discount}{promo}, {row['provider']}, {row['created_at']}")
         text = "\n".join(lines)
         markup = purchases_for_review(rows)
     await callback.message.edit_text(text, reply_markup=markup)
@@ -188,6 +190,8 @@ async def review_comment(
     for admin_id in settings.admin_ids:
         if product["photo_path"] and Path(product["photo_path"]).exists():
             await message.bot.send_photo(admin_id, FSInputFile(product["photo_path"]), caption=caption)
+        elif product["photo_file_id"]:
+            await message.bot.send_photo(admin_id, product["photo_file_id"], caption=caption)
         else:
             await message.bot.send_message(admin_id, caption)
 

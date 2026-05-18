@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 from bot.config import Settings
 from bot.keyboards.admin import (
     admin_menu,
+    grant_balance_type,
     photo_step,
     promo_actions,
     promos as promos_keyboard,
@@ -25,7 +26,7 @@ from bot.repositories.section_photos import SectionPhotoRepository
 from bot.repositories.subscriptions import SubscriptionRepository
 from bot.repositories.users import UserRepository
 from bot.services.media import save_message_photo
-from bot.states import AddProduct, PromoCreate, SectionPhotoEdit
+from bot.states import AddProduct, GrantBalance, PromoCreate, SectionPhotoEdit
 from bot.utils.callback_cache import get
 
 router = Router()
@@ -81,7 +82,8 @@ async def admin_products(callback: CallbackQuery, products: ProductRepository, s
         return
     rows = await products.list_active()
     body = "\n".join(
-        f"#{row['id']} {row['title']} — {row['category']} / {row['subcategory']} / {row['optimization_type']} — {row['price']} ⭐"
+        f"#{row['id']} {row['title']} — {row['category']} / {row['subcategory']} / {row['optimization_type']} — "
+        f"{row['price']} {'₽' if row['price_currency'] == 'rub' else '⭐'}"
         for row in rows[:50]
     )
     text = f"📦 Товары\n\n{body}" if body else "📦 Товаров нет."
@@ -98,7 +100,7 @@ async def admin_users(callback: CallbackQuery, users: UserRepository, settings: 
     lines = ["👥 Пользователи\n"]
     for row in rows:
         lines.append(
-            f"• {row['telegram_id']} | рег: {row['registered_at']} | покупки: {row['purchases_count']} | баланс: {row['balance']} ⭐"
+            f"• {row['telegram_id']} @{row['username'] or '-'} | рег: {row['registered_at']} | покупки: {row['purchases_count']} | баланс: {row['balance']} ⭐ / {row['balance_rub']} ₽"
         )
     await callback.message.edit_text("\n".join(lines), reply_markup=admin_menu())
     await callback.answer()
@@ -113,7 +115,7 @@ async def admin_sales(callback: CallbackQuery, orders: OrderRepository, settings
     lines = ["💰 Продажи\n"]
     for row in rows:
         lines.append(
-            f"#{row['id']} | user {row['user_id']} | {row['title']} | {row['amount']} ⭐ | "
+            f"#{row['id']} | user {row['user_id']} | {row['title']} | {row['amount']} {'₽' if row['amount_currency'] == 'rub' else '⭐'} | "
             f"скидка {row['discount_percent']}% | {row['promo_code'] or '-'} | {row['provider']} | {row['created_at']}"
         )
     await callback.message.edit_text("\n".join(lines), reply_markup=admin_menu())
@@ -133,6 +135,49 @@ async def admin_subscriptions(callback: CallbackQuery, subscriptions_repo: Subsc
         )
     await callback.message.edit_text("\n".join(lines), reply_markup=admin_menu())
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin_grant_balance")
+async def admin_grant_balance(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not _is_admin(callback.from_user.id, settings):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await state.clear()
+    await state.set_state(GrantBalance.user_id)
+    await callback.message.edit_text("Введите Telegram ID пользователя, которому нужно выдать баланс:")
+    await callback.answer()
+
+
+@router.message(GrantBalance.user_id)
+async def grant_user_id(message: Message, state: FSMContext) -> None:
+    if not message.text or not message.text.isdigit():
+        await message.answer("ID должен быть числом.")
+        return
+    await state.update_data(user_id=int(message.text))
+    await state.set_state(GrantBalance.balance_type)
+    await message.answer("Что выдать пользователю?", reply_markup=grant_balance_type())
+
+
+@router.callback_query(GrantBalance.balance_type, lambda c: c.data.startswith("grant_type:"))
+async def grant_type(callback: CallbackQuery, state: FSMContext) -> None:
+    balance_type = callback.data.split(":")[1]
+    await state.update_data(balance_type=balance_type)
+    await state.set_state(GrantBalance.amount)
+    suffix = "звёзд" if balance_type == "stars" else "рублей"
+    await callback.message.edit_text(f"Введите количество {suffix}:")
+    await callback.answer()
+
+
+@router.message(GrantBalance.amount)
+async def grant_amount(message: Message, state: FSMContext, users: UserRepository) -> None:
+    if not message.text or not message.text.isdigit() or int(message.text) <= 0:
+        await message.answer("Сумма должна быть положительным числом.")
+        return
+    data = await state.get_data()
+    await users.grant_balance(data["user_id"], data["balance_type"], int(message.text), message.from_user.id)
+    await state.clear()
+    suffix = "⭐" if data["balance_type"] == "stars" else "₽"
+    await message.answer(f"✅ Пользователю {data['user_id']} выдано {int(message.text)} {suffix}.", reply_markup=admin_menu())
 
 
 @router.callback_query(lambda c: c.data == "admin_add_product")
@@ -177,7 +222,11 @@ async def add_category_choice(callback: CallbackQuery, state: FSMContext) -> Non
         await callback.message.edit_text("Введите свой раздел одним сообщением:")
         await callback.answer()
         return
-    await state.update_data(category=get(key))
+    value = get(key)
+    if not value:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(category=value)
     await state.set_state(AddProduct.subcategory)
     await callback.message.edit_text("Выберите подкатегорию или игру:", reply_markup=static_choice(DEFAULT_SUBCATEGORIES, "add_subcategory"))
     await callback.answer()
@@ -197,7 +246,11 @@ async def add_subcategory_choice(callback: CallbackQuery, state: FSMContext) -> 
         await callback.message.edit_text("Введите свою подкатегорию или игру одним сообщением:")
         await callback.answer()
         return
-    await state.update_data(subcategory=get(key))
+    value = get(key)
+    if not value:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(subcategory=value)
     await state.set_state(AddProduct.optimization_type)
     await callback.message.edit_text("Выберите тип оптимизации:", reply_markup=static_choice(DEFAULT_TYPES, "add_type"))
     await callback.answer()
@@ -217,7 +270,11 @@ async def add_optimization_type_choice(callback: CallbackQuery, state: FSMContex
         await callback.message.edit_text("Введите свой тип оптимизации одним сообщением:")
         await callback.answer()
         return
-    await state.update_data(optimization_type=get(key))
+    value = get(key)
+    if not value:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(optimization_type=value)
     await state.set_state(AddProduct.game)
     await callback.message.edit_text("Выберите игру/назначение:", reply_markup=static_choice(DEFAULT_SUBCATEGORIES, "add_game"))
     await callback.answer()
@@ -237,17 +294,41 @@ async def add_game_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_text("Введите игру или назначение одним сообщением:")
         await callback.answer()
         return
-    await state.update_data(game=get(key))
-    await state.set_state(AddProduct.price)
-    await callback.message.edit_text("Введите цену в Telegram Stars числом:")
+    value = get(key)
+    if not value:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(game=value)
+    await state.set_state(AddProduct.price_currency)
+    await callback.message.edit_text(
+        "Выберите валюту цены товара:",
+        reply_markup=static_choice([("⭐ Telegram Stars", "stars"), ("₽ Рубли", "rub")], "add_price_currency"),
+    )
     await callback.answer()
 
 
 @router.message(AddProduct.game)
 async def add_game_custom(message: Message, state: FSMContext) -> None:
     await state.update_data(game=message.text)
+    await state.set_state(AddProduct.price_currency)
+    await message.answer(
+        "Выберите валюту цены товара:",
+        reply_markup=static_choice([("⭐ Telegram Stars", "stars"), ("₽ Рубли", "rub")], "add_price_currency"),
+    )
+
+
+@router.callback_query(AddProduct.price_currency, lambda c: c.data.startswith("add_price_currency:"))
+async def add_price_currency(callback: CallbackQuery, state: FSMContext) -> None:
+    key = callback.data.split(":", 1)[1]
+    currency = get(key)
+    if not currency:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(price_currency=currency)
     await state.set_state(AddProduct.price)
-    await message.answer("Введите цену в Telegram Stars числом:")
+    suffix = "рублях" if currency == "rub" else "Telegram Stars"
+    await callback.message.edit_text(f"Введите цену в {suffix} числом:")
+    await callback.answer()
 
 
 @router.message(AddProduct.price)
@@ -263,7 +344,11 @@ async def add_price(message: Message, state: FSMContext) -> None:
 @router.callback_query(AddProduct.badge, lambda c: c.data.startswith("add_badge:"))
 async def add_badge(callback: CallbackQuery, state: FSMContext) -> None:
     key = callback.data.split(":", 1)[1]
-    await state.update_data(badge=get(key) or "")
+    value = get(key)
+    if value is None:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(badge=value or "")
     await state.set_state(AddProduct.before_fps)
     await callback.message.edit_text("Введите FPS до оптимизации:")
     await callback.answer()
@@ -291,7 +376,7 @@ async def add_after_fps(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(AddProduct.photo, lambda c: c.data == "add_photo_skip")
 async def add_photo_skip(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(photo_path="")
+    await state.update_data(photo_path="", photo_file_id="")
     await state.set_state(AddProduct.screenshot)
     await callback.message.edit_text("Отправьте скриншот результата до/после.", reply_markup=photo_step("add_screenshot_skip"))
     await callback.answer()
@@ -299,15 +384,15 @@ async def add_photo_skip(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(AddProduct.photo, F.photo)
 async def add_photo_upload(message: Message, bot: Bot, state: FSMContext, settings: Settings) -> None:
-    file_path, _ = await save_message_photo(bot, message, settings, "products")
-    await state.update_data(photo_path=file_path)
+    file_path, file_id = await save_message_photo(bot, message, settings, "products")
+    await state.update_data(photo_path=file_path, photo_file_id=file_id)
     await state.set_state(AddProduct.screenshot)
     await message.answer("Фото товара сохранено. Теперь отправьте скриншот результата до/после.", reply_markup=photo_step("add_screenshot_skip"))
 
 
 @router.callback_query(AddProduct.screenshot, lambda c: c.data == "add_screenshot_skip")
 async def add_screenshot_skip(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(screenshot_path="")
+    await state.update_data(screenshot_path="", screenshot_file_id="")
     await state.set_state(AddProduct.full_link)
     await callback.message.edit_text("Вставьте ссылку на полную версию товара:")
     await callback.answer()
@@ -315,8 +400,8 @@ async def add_screenshot_skip(callback: CallbackQuery, state: FSMContext) -> Non
 
 @router.message(AddProduct.screenshot, F.photo)
 async def add_screenshot_upload(message: Message, bot: Bot, state: FSMContext, settings: Settings) -> None:
-    file_path, _ = await save_message_photo(bot, message, settings, "product_results")
-    await state.update_data(screenshot_path=file_path)
+    file_path, file_id = await save_message_photo(bot, message, settings, "product_results")
+    await state.update_data(screenshot_path=file_path, screenshot_file_id=file_id)
     await state.set_state(AddProduct.full_link)
     await message.answer("Скриншот сохранён. Вставьте ссылку на полную версию товара:")
 
@@ -341,7 +426,11 @@ async def add_demo_link(message: Message, state: FSMContext) -> None:
 @router.callback_query(AddProduct.is_extra, lambda c: c.data.startswith("add_extra:"))
 async def add_is_extra(callback: CallbackQuery, state: FSMContext) -> None:
     key = callback.data.split(":", 1)[1]
-    await state.update_data(is_extra=int(get(key) or 0))
+    value = get(key)
+    if value is None:
+        await callback.answer("Кнопка устарела. Начните добавление товара заново.", show_alert=True)
+        return
+    await state.update_data(is_extra=int(value or 0))
     await state.set_state(AddProduct.restore_link)
     await callback.message.edit_text("Вставьте ссылку на restore-файл/инструкцию или отправьте «-»:")
     await callback.answer()
@@ -393,20 +482,50 @@ async def promo_discount(message: Message, state: FSMContext) -> None:
         await message.answer("Скидка должна быть числом от 1 до 99.")
         return
     await state.update_data(discount_percent=int(message.text))
-    await state.set_state(PromoCreate.expires_at)
-    await message.answer("Введите срок действия в формате YYYY-MM-DD или «-» без срока:")
+    await state.set_state(PromoCreate.expires_day)
+    await message.answer("Введите день окончания промокода числом от 1 до 31 или «-» без срока:")
 
 
-@router.message(PromoCreate.expires_at)
-async def promo_expires(message: Message, state: FSMContext) -> None:
+@router.message(PromoCreate.expires_day)
+async def promo_expires_day(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
-    expires_at = None
-    if raw != "-":
-        try:
-            expires_at = datetime.strptime(raw, "%Y-%m-%d").replace(hour=23, minute=59, second=59).isoformat()
-        except ValueError:
-            await message.answer("Неверный формат. Введите дату как YYYY-MM-DD или «-».")
-            return
+    if raw == "-":
+        await state.update_data(expires_at=None)
+        await state.set_state(PromoCreate.usage_limit)
+        await message.answer("Введите лимит использований числом или «-» без лимита:")
+        return
+    if not raw.isdigit() or not 1 <= int(raw) <= 31:
+        await message.answer("День должен быть числом от 1 до 31 или «-».")
+        return
+    await state.update_data(expires_day=int(raw))
+    await state.set_state(PromoCreate.expires_month)
+    await message.answer("Введите месяц окончания промокода числом от 1 до 12:")
+
+
+@router.message(PromoCreate.expires_month)
+async def promo_expires_month(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not 1 <= int(raw) <= 12:
+        await message.answer("Месяц должен быть числом от 1 до 12.")
+        return
+    await state.update_data(expires_month=int(raw))
+    await state.set_state(PromoCreate.expires_year)
+    await message.answer("Введите год окончания промокода, например 2026:")
+
+
+@router.message(PromoCreate.expires_year)
+async def promo_expires_year(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or int(raw) < datetime.now().year:
+        await message.answer("Год должен быть числом не меньше текущего года.")
+        return
+    data = await state.get_data()
+    try:
+        expires_at = datetime(int(raw), data["expires_month"], data["expires_day"], 23, 59, 59).isoformat()
+    except ValueError:
+        await message.answer("Такой даты не существует. Введите день заново.")
+        await state.set_state(PromoCreate.expires_day)
+        return
     await state.update_data(expires_at=expires_at)
     await state.set_state(PromoCreate.usage_limit)
     await message.answer("Введите лимит использований числом или «-» без лимита:")
@@ -479,6 +598,7 @@ async def admin_section_photos(callback: CallbackQuery, products: ProductReposit
         ("🔔 Подписки", "subscriptions"),
         ("💬 Поддержка", "support"),
         ("⭐ Отзывы", "reviews"),
+        ("📜 Правила", "rules"),
     ]
     categories = [(f"📁 Категория: {row['category']}", f"category:{row['category']}") for row in await products.categories()]
     subcats = []
@@ -546,6 +666,8 @@ async def section_photo_view(callback: CallbackQuery, section_photos: SectionPho
         return
     if Path(photo["file_path"]).exists():
         await callback.message.answer_photo(FSInputFile(photo["file_path"]), caption=photo["title"])
+    elif photo["file_id"]:
+        await callback.message.answer_photo(photo["file_id"], caption=photo["title"])
     else:
         await callback.message.answer(f"Фото записано в базе, но файл не найден: {photo['file_path']}")
     await callback.answer()
